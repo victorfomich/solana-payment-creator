@@ -3,6 +3,16 @@
 (function () {
 	const { Transaction, Connection } = solanaWeb3;
 
+	// Helper function to decode base64 in browser
+	function base64ToUint8Array(base64) {
+		const binaryString = atob(base64);
+		const bytes = new Uint8Array(binaryString.length);
+		for (let i = 0; i < binaryString.length; i++) {
+			bytes[i] = binaryString.charCodeAt(i);
+		}
+		return bytes;
+	}
+
 	const connectButton = document.getElementById('connectButton');
 	const payButton = document.getElementById('payButton');
 	const clientAddressEl = document.getElementById('clientAddress');
@@ -101,7 +111,7 @@
 
 			const { transactionBase64, rpcUrl, network: usedNetwork } = serverResp;
 
-			const tx = Transaction.from(Buffer.from(transactionBase64, 'base64'));
+			const tx = Transaction.from(base64ToUint8Array(transactionBase64));
 
 			if (!tx.feePayer || tx.feePayer.toBase58() !== walletPublicKey.toBase58()) {
 				throw new Error('Неверный feePayer в транзакции');
