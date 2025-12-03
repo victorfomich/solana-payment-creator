@@ -14,6 +14,8 @@ npm install -g vercel
 vercel login
 ```
 
+123123
+
 ### 3. Деплойте проект
 
 ```bash
