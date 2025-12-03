@@ -1,53 +1,63 @@
 'use strict';
 
 (function () {
-	const generateButton = document.getElementById('generateButton');
+	const { Transaction, Connection } = solanaWeb3;
+
+	const connectButton = document.getElementById('connectButton');
+	const payButton = document.getElementById('payButton');
+	const clientAddressEl = document.getElementById('clientAddress');
 	const recipientInput = document.getElementById('recipientInput');
 	const amountInput = document.getElementById('amountInput');
-	const labelInput = document.getElementById('labelInput');
-	const messageInput = document.getElementById('messageInput');
 	const networkSelect = document.getElementById('networkSelect');
 	const statusEl = document.getElementById('status');
-	const paymentResultEl = document.getElementById('paymentResult');
-	const qrCodeImage = document.getElementById('qrCodeImage');
-	const solanaPayLink = document.getElementById('solanaPayLink');
-	const copyLinkButton = document.getElementById('copyLinkButton');
-	const detailRecipient = document.getElementById('detailRecipient');
-	const detailAmount = document.getElementById('detailAmount');
-	const detailNetwork = document.getElementById('detailNetwork');
+	const resultEl = document.getElementById('result');
+
+	let wallet = null;
+	let walletPublicKey = null;
 
 	function setStatus(msg, type = 'info') {
 		statusEl.textContent = msg || '';
 		statusEl.className = `status ${type}`;
 	}
 
-	function hidePaymentResult() {
-		paymentResultEl.classList.add('hidden');
+	function setResult(html) {
+		resultEl.innerHTML = html || '';
 	}
 
-	function showPaymentResult(data) {
-		qrCodeImage.src = data.qrCodeDataUrl;
-		solanaPayLink.href = data.solanaPayUrl;
-		solanaPayLink.textContent = data.solanaPayUrl;
-		detailRecipient.textContent = data.recipient;
-		detailAmount.textContent = data.amount;
-		detailNetwork.textContent = data.network;
-		paymentResultEl.classList.remove('hidden');
+	function isPhantomAvailable() {
+		return typeof window.solana !== 'undefined' && window.solana.isPhantom;
 	}
 
-	async function createPaymentRequest(recipient, amount, label, message, network) {
-		const body = {
-			recipient: recipient.trim(),
-			amount,
-			network,
-		};
-		if (label) body.label = label.trim();
-		if (message) body.message = message.trim();
+	async function connectWallet() {
+		if (!isPhantomAvailable()) {
+			setStatus('❌ Phantom не найден. Установите расширение Phantom.', 'error');
+			window.open('https://phantom.app/', '_blank');
+			return;
+		}
+		try {
+			wallet = window.solana;
+			const resp = await wallet.connect({ onlyIfTrusted: false });
+			walletPublicKey = resp.publicKey;
+			clientAddressEl.textContent = walletPublicKey.toBase58();
+			payButton.disabled = false;
+			setStatus('✅ Кошелёк подключен! Теперь введите детали платежа.', 'success');
+		} catch (e) {
+			setStatus(`❌ Не удалось подключить кошелёк: ${e.message || e}`, 'error');
+		}
+	}
 
-		const resp = await fetch('/api/create-payment', {
+	connectButton.addEventListener('click', connectWallet);
+
+	async function createUnsignedTxOnServer(sender, recipient, amount, network) {
+		const resp = await fetch('/api/create-transfer', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body),
+			body: JSON.stringify({
+				sender: sender.toBase58(),
+				recipient: recipient.trim(),
+				amount: amount,
+				network,
+			}),
 		});
 		if (!resp.ok) {
 			const err = await resp.json().catch(() => ({}));
@@ -56,47 +66,84 @@
 		return resp.json();
 	}
 
-	generateButton.addEventListener('click', async () => {
+	function explorerTxUrl(signature, network) {
+		const base = 'https://explorer.solana.com/tx/';
+		if (network === 'devnet') return `${base}${signature}?cluster=devnet`;
+		if (network === 'testnet') return `${base}${signature}?cluster=testnet`;
+		return `${base}${signature}`;
+	}
+
+	payButton.addEventListener('click', async () => {
 		setStatus('', 'info');
-		hidePaymentResult();
+		setResult('');
 
 		try {
+			if (!walletPublicKey) {
+				setStatus('❌ Сначала подключите Phantom', 'error');
+				return;
+			}
+
 			const recipient = recipientInput.value.trim();
 			const amount = Number(amountInput.value);
-			const label = labelInput.value.trim();
-			const message = messageInput.value.trim();
 			const network = networkSelect.value;
 
 			if (!recipient) {
-				setStatus('Введите адрес получателя', 'error');
+				setStatus('❌ Введите адрес получателя', 'error');
 				return;
 			}
 			if (!Number.isFinite(amount) || amount <= 0) {
-				setStatus('Введите корректную сумму в SOL', 'error');
+				setStatus('❌ Введите корректную сумму в SOL', 'error');
 				return;
 			}
 
-			setStatus('Создаю платёжный запрос...', 'info');
-			const data = await createPaymentRequest(recipient, amount, label, message, network);
-			
-			setStatus('Платёжный запрос создан! Отправьте QR код или ссылку клиенту.', 'success');
-			showPaymentResult(data);
-		} catch (e) {
-			setStatus(e.message || String(e), 'error');
-		}
-	});
+			setStatus('⏳ Создаю транзакцию на сервере...', 'info');
+			const serverResp = await createUnsignedTxOnServer(walletPublicKey, recipient, amount, network);
 
-	copyLinkButton.addEventListener('click', async () => {
-		try {
-			const url = solanaPayLink.href;
-			await navigator.clipboard.writeText(url);
-			const originalText = copyLinkButton.textContent;
-			copyLinkButton.textContent = 'Скопировано!';
-			setTimeout(() => {
-				copyLinkButton.textContent = originalText;
-			}, 2000);
+			const { transactionBase64, rpcUrl, network: usedNetwork } = serverResp;
+
+			const tx = Transaction.from(Buffer.from(transactionBase64, 'base64'));
+
+			if (!tx.feePayer || tx.feePayer.toBase58() !== walletPublicKey.toBase58()) {
+				throw new Error('Неверный feePayer в транзакции');
+			}
+
+			setStatus('⏳ Отправляю запрос в Phantom на подтверждение...', 'info');
+
+			let signature = null;
+
+			try {
+				const { signature: sig } = await wallet.signAndSendTransaction(tx);
+				signature = sig;
+			} catch (walletSendErr) {
+				console.warn('signAndSendTransaction failed, fallback to signTransaction + sendRawTransaction', walletSendErr);
+				setStatus('⏳ Отправляю через RPC (фоллбек)...', 'info');
+				const signed = await wallet.signTransaction(tx);
+				const conn = new Connection(rpcUrl, 'confirmed');
+				signature = await conn.sendRawTransaction(signed.serialize(), {
+					skipPreflight: false,
+					preflightCommitment: 'confirmed',
+					maxRetries: 3,
+				});
+			}
+
+			setStatus('⏳ Подтверждаю транзакцию...', 'info');
+			try {
+				const conn2 = new Connection(rpcUrl, 'confirmed');
+				await conn2.confirmTransaction(signature, 'confirmed');
+			} catch (e) {
+				console.warn('confirmTransaction warning:', e);
+			}
+
+			setStatus('✅ Платёж отправлен успешно!', 'success');
+			const link = explorerTxUrl(signature, usedNetwork);
+			setResult(
+				`<div class="tx">
+					<strong>Транзакция отправлена!</strong><br>
+					Подпись: <a href="${link}" target="_blank" rel="noreferrer noopener">${signature}</a>
+				</div>`
+			);
 		} catch (e) {
-			setStatus('Не удалось скопировать: ' + e.message, 'error');
+			setStatus(`❌ Ошибка: ${e.message || String(e)}`, 'error');
 		}
 	});
 })();

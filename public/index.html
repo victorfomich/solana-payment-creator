@@ -3,66 +3,54 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Создание платежа Solana Pay</title>
+		<title>Создание платежа Solana</title>
 		<link rel="stylesheet" href="/styles.css" />
+		<script src="https://unpkg.com/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
 	</head>
 	<body>
 		<div class="container">
-			<h1>Создать платёжный запрос (Solana Pay)</h1>
+			<h1>Создание платежа Solana</h1>
 			<p class="muted">
-				Вы вводите адрес кошелька клиента и сумму → получаете QR код и ссылку → клиент сканирует в Phantom (или кликает ссылку) → подтверждает платёж.
+				<strong>Как это работает:</strong><br>
+				1️⃣ Клиент (кто платит) открывает этот сайт и подключает свой Phantom<br>
+				2️⃣ Вы вводите ВАШ адрес (куда придут деньги) и сумму<br>
+				3️⃣ Нажимаете кнопку → создаётся транзакция → клиент видит запрос в Phantom и подтверждает
 			</p>
 
 			<div class="card">
-				<div class="inline">
-					<label>Сеть:</label>
-					<select id="networkSelect">
-						<option value="testnet" selected>testnet</option>
-						<option value="devnet">devnet</option>
-						<option value="mainnet-beta">mainnet-beta</option>
-					</select>
+				<h3>Шаг 1: Клиент подключает кошелёк</h3>
+				<div class="row">
+					<button id="connectButton">Подключить Phantom</button>
+					<div class="inline">
+						<label>Сеть:</label>
+						<select id="networkSelect">
+							<option value="testnet" selected>testnet</option>
+							<option value="devnet">devnet</option>
+							<option value="mainnet-beta">mainnet-beta</option>
+						</select>
+					</div>
+				</div>
+				<div class="info">
+					<div><strong>Кошелёк клиента (кто платит):</strong> <span id="clientAddress">не подключен</span></div>
+					<div class="hint">⚠️ В Phantom должна быть выбрана та же сеть</div>
 				</div>
 			</div>
 
 			<div class="card">
+				<h3>Шаг 2: Вы создаёте запрос на оплату</h3>
 				<div class="field">
-					<label for="recipientInput">Ваш адрес (получатель платежа)</label>
+					<label for="recipientInput">Ваш адрес (кому придут деньги)</label>
 					<input id="recipientInput" type="text" placeholder="Например: 4Nd1m... (ваш Solana адрес)" />
 				</div>
 				<div class="field">
 					<label for="amountInput">Сумма (SOL)</label>
 					<input id="amountInput" type="number" min="0" step="0.000000001" placeholder="Например: 0.5" />
 				</div>
-				<div class="field">
-					<label for="labelInput">Метка (опционально)</label>
-					<input id="labelInput" type="text" placeholder="Например: Оплата услуг" />
-				</div>
-				<div class="field">
-					<label for="messageInput">Сообщение (опционально)</label>
-					<input id="messageInput" type="text" placeholder="Например: Спасибо за заказ!" />
-				</div>
-				<button id="generateButton" class="primary">Создать платёжный запрос</button>
+				<button id="payButton" class="primary" disabled>Создать транзакцию и отправить на подтверждение</button>
 			</div>
 
 			<div id="status" class="status"></div>
-			
-			<div id="paymentResult" class="payment-result hidden">
-				<h2>Платёжный запрос создан</h2>
-				<div class="qr-container">
-					<img id="qrCodeImage" alt="QR код Solana Pay" />
-					<p class="hint">Клиент может отсканировать этот QR код в мобильном Phantom</p>
-				</div>
-				<div class="link-container">
-					<p><strong>Или отправьте клиенту эту ссылку:</strong></p>
-					<a id="solanaPayLink" href="#" target="_blank" class="pay-link">Открыть в Phantom</a>
-					<button id="copyLinkButton" class="copy-btn">Копировать ссылку</button>
-				</div>
-				<div class="payment-details">
-					<p><strong>Получатель:</strong> <span id="detailRecipient"></span></p>
-					<p><strong>Сумма:</strong> <span id="detailAmount"></span> SOL</p>
-					<p><strong>Сеть:</strong> <span id="detailNetwork"></span></p>
-				</div>
-			</div>
+			<div id="result" class="result"></div>
 		</div>
 
 		<script src="/app.js"></script>

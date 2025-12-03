@@ -8,6 +8,8 @@ const {
 	Connection,
 	clusterApiUrl,
 	PublicKey,
+	SystemProgram,
+	Transaction,
 	LAMPORTS_PER_SOL,
 } = require('@solana/web3.js');
 const QRCode = require('qrcode');
@@ -70,7 +72,70 @@ app.get('/api/health', (_req, res) => {
 	res.json({ ok: true, network: getNetworkFromEnv() });
 });
 
-// Generate Solana Pay URL and QR code for transfer
+// Build an unsigned SystemProgram.transfer transaction
+app.post('/api/create-transfer', async (req, res) => {
+	try {
+		const {
+			sender, // client's address (feePayer and fromPubkey)
+			recipient, // merchant's address
+			amount, // amount in SOL
+			network, // optional: 'devnet' | 'testnet' | 'mainnet-beta'
+		} = req.body || {};
+
+		if (!sender || !recipient || amount === undefined) {
+			return res.status(400).json({
+				error: 'Missing required fields: sender, recipient, amount',
+			});
+		}
+
+		const amountSol = parsePositiveNumber(amount);
+		if (!amountSol) {
+			return res.status(400).json({ error: 'Amount must be a positive number' });
+		}
+
+		const { connection, network: usedNetwork, rpcUrl } = getConnection(network);
+
+		const senderPubkey = assertValidPubkey(sender, 'sender');
+		const recipientPubkey = assertValidPubkey(recipient, 'recipient');
+		const lamports = toLamports(amountSol);
+
+		const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
+
+		const tx = new Transaction({
+			feePayer: senderPubkey,
+			recentBlockhash: blockhash,
+		}).add(
+			SystemProgram.transfer({
+				fromPubkey: senderPubkey,
+				toPubkey: recipientPubkey,
+				lamports,
+			}),
+		);
+
+		// Serialize without signatures so wallets can sign
+		const serialized = tx.serialize({
+			requireAllSignatures: false,
+			verifySignatures: false,
+		});
+
+		return res.json({
+			transactionBase64: serialized.toString('base64'),
+			blockhash,
+			lastValidBlockHeight,
+			network: usedNetwork,
+			rpcUrl,
+			feePayer: senderPubkey.toBase58(),
+			amountLamports: lamports,
+		});
+	} catch (e) {
+		const status = e.statusCode || 500;
+		return res.status(status).json({
+			error: e.message || 'Unexpected error',
+		});
+	}
+});
+
+// Generate Solana Pay URL and QR code for transfer (legacy endpoint)
 app.post('/api/create-payment', async (req, res) => {
 	try {
 		const {

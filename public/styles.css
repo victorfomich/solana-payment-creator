@@ -28,6 +28,11 @@ h1 {
 	font-size: 24px;
 	margin: 0 0 8px 0;
 }
+h3 {
+	font-size: 18px;
+	margin: 0 0 12px 0;
+	color: var(--primary);
+}
 .muted {
 	color: var(--muted);
 	margin-bottom: 20px;
